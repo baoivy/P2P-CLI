@@ -9,6 +9,8 @@ Flag = False
 peer_repo = []
 SERVER_PORT = 7774
 SERVER_HOST = "localhost"
+BLOCK = 128 << 10 # 128KB
+BLOCK1 = 1 << 20 # 1024KB
 
 def send_requests(msg : str, server_host, server_port):
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -17,6 +19,7 @@ def send_requests(msg : str, server_host, server_port):
     response = client_socket.recv(1024).decode()
     print(response)
     client_socket.close()
+    return response
 
 def upload():
     upload_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -32,48 +35,49 @@ def upload():
     upload_socket.close()
 
 def peer_connect(client_socket):
-    filename = client_socket.recv(1024).decode()
-    with open(filename, 'rb') as f1:
-        file_size = os.path.getsize(filename)
-        #Print
-        client_socket.send(("recievied_" + filename).encode())
-        client_socket.send(str(file_size).encode())
-
-        data = f1.read()
-    client_socket.sendall(data)
-    client_socket.send(b"<END>")
-    f1.close()
+    reponame = client_socket.recv(1024).decode()
+    filename = ""
+    for repo in peer_repo:
+        if repo['reponame'] == reponame:
+            filename = repo['filename']
+    file_size = os.path.getsize(filename)
+    #Print for another pear
+    client_socket.send(("recievied_" + filename).encode())
+    client_socket.send(str(file_size).encode())
+    with (client_socket, client_socket.makefile('wb') as wfile):
+        with open(filename, 'rb') as f1:
+            while data := f1.read(BLOCK):
+                 wfile.write(data)
+        wfile.flush()
+        f1.close()
+    wfile.close()
     client_socket.close()
 
-def download(filename):
+def download(reponame):
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     upload_host1 = socket.gethostbyname(socket.gethostname())
-    msg = "FIND P2P-CI/1.0\nFILENAME:" + filename
+    msg = "FIND P2P-CI/1.0\nREPONAME:" + reponame
     send_requests(msg, "localhost", SERVER_PORT)
     #####
     port1 = int(input("Input peer port from list above: "))
     client.connect((upload_host1, port1))
-    client.send(filename.encode())
+    client.send(reponame.encode())
     file_name = client.recv(1024).decode()
     file_size = client.recv(1024).decode()
     print(file_name + " " + file_size)
-    file_byte = b""
-    done = False
 
     progress = tqdm.tqdm(unit='B', unit_scale=True, 
                          unit_divisor=1000, total=int(file_size))
-    with open(file_name, 'wb') as f:
-        while not done:
-            data = client.recv(1024)
-            if file_byte[-5:] == b"<END>":
-                done = True
-            else:
-                file_byte += data
-            progress.update(1024)
-
-        f.write(file_byte)
-
-    f.close()
+    with client.makefile('rb') as rfile:
+        with open(file_name, 'wb') as f:
+            remaining = int(file_size)
+            while remaining != 0:
+                data = rfile.read(BLOCK1 if remaining > BLOCK1 else remaining)
+                f.write(data)
+                progress.update(len(data))
+                remaining -= len(data)
+        f.close()
+    rfile.close()
     client.close()
 
 def add(host):
@@ -81,8 +85,8 @@ def add(host):
     send_requests(msg, "localhost", SERVER_PORT)
 
 def publish(host, title, filename):
-    peer_repo.append(filename)
-    msg = "PUBLISH RFC P2P-CI/1.0\nHost:"+ host + '\n'+"Port:"+str(port)+'\n'+"Title:"+ title + '\n'+ "File:"+ filename 
+    peer_repo.append({"filename" : title, "reponame" : filename})
+    msg = "PUBLISH RFC P2P-CI/1.0\nHost:"+ host + '\n'+"Port:"+str(port)+'\n'+"File:"+ title + '\n'+ "Repo:"+ filename 
     send_requests(msg, "localhost", SERVER_PORT)
 
 def exit(host):
@@ -90,6 +94,15 @@ def exit(host):
     send_requests(msg, "localhost", SERVER_PORT)
     Flag = True
 
+def find(filename):
+    print(f"Exist {filename}" if filename in peer_repo else "Not exist")
+
+def help():
+    print("List of command used in assignment situation:")
+    print("1. fetch <fname> : Fetch your file to your PC")
+    print("2. publish <lname> <fname> : Publish file from local to repository")
+    print("3. find <fname> : Find your file that in your repository or not")
+    print("4. exit : Exit from server")
 
 def recieve_ping():
     serverSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -102,8 +115,6 @@ def recieve_ping():
             time.sleep(1)
             message, address = serverSocket.recvfrom(1024)
             message = message.upper()
-            if rand < 3:
-                continue
             serverSocket.sendto(message, address)
         except:
             pass
@@ -115,12 +126,25 @@ def command_line():
         command = input()
         command_split = command.split(' ')
         if command_split[0] == 'fetch':
-            download(command_split[1])
+            if len(command_split) != 2:
+                print("Note : fetch only accept 1 argument")
+            else:
+                download(command_split[1])
         elif command_split[0] == 'publish':
-            publish(hostname, command_split[1], command_split[2])
+            if len(command_split) != 3:
+                print("Note : publish only accept 2 argument")
+            else:
+                publish(hostname, command_split[1], command_split[2])
+        elif command_split[0] == 'find':
+            if len(command_split) != 2:
+                 print("Note : publish only accept 1 argument")
+            else:
+                find(command_split[1])
         elif command_split[0] == 'exit':
             exit(hostname)
             break
+        elif command_split[0] == 'help':
+            help()
         else:
             print('Command error!')
 

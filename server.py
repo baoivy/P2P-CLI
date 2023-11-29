@@ -14,13 +14,14 @@ def add_client(data_list, client_socket):
     port = data_list[2].split(':')[1]
     active_client.append({"host" : host, "port" : port})
     client_socket.send('Sucessfully joined the P2P network'.encode())
+    print(f'Welcome client : {host}')
 
 
 def discover(data_list):
     host = data_list[1]
     for rfc,i in zip(rfc_index, range(1, len(rfc_index) + 1)):
         if rfc['host'] == host:
-            print(str(i) + ". " + rfc['filename'])
+            print(str(i) + ". " + rfc['filename'] + " " + rfc['reponame'])
 
 def ping(data_list):
     tmp_port = 0
@@ -38,6 +39,7 @@ def ping(data_list):
             data, server = clientSocket.recvfrom(1024)
             recdTime = time.time()
             rtt = recdTime - sendTime
+            time.sleep(1)
             print ("Message Received :", data)
             print ("Round Trip Time", rtt)
         
@@ -46,12 +48,17 @@ def ping(data_list):
             print ('REQUEST TIMED OUT')
     return
 
+def help():
+    print("List of command used in assignment situation:")
+    print("1. ping <user> : Ping from server to <user> to check live")
+    print("2. discover <user> : Discover all file from specific user")
+    print("3. exit : Shutdown server")
 
 def find_peer(data_list, client_socket):
     filename = data_list[1].split(':')[1]
-    tmp_msg = ""
+    tmp_msg = f"\nList of clients that have file : {filename}\n"
     for rfc in rfc_index:
-        if rfc['filename'] == filename:
+        if rfc['reponame'] == filename:
             tmp_str = str(rfc['host']) + " " + str(rfc['port']) + '\n'
             tmp_msg += tmp_str
     client_socket.send(tmp_msg.encode())
@@ -60,7 +67,11 @@ def add_repo_client(data_list, client_socket):
     host = data_list[1].split(':')[1]
     filename = data_list[3].split(':')[1]
     port = data_list[2].split(':')[1]
-    rfc_index.append({"host" : host, "port" : port, "filename" : filename})
+    repo_name = data_list[4].split(':')[1]
+    rfc_index.append({"host" : host, 
+                      "port" : port, 
+                      "filename" : filename, 
+                      "reponame" : repo_name})
     response = "PUBLISH P2P-CI/1.0 200 OK"
     client_socket.send(response.encode())
 
@@ -95,11 +106,19 @@ def command_line():
     command = input()
     command_split = command.split(' ')
     if command_split[0] == 'discover':
-        discover(command_split)
+        if len(command_split) != 2:
+            print("Note : discover only accept 1 argument")
+        else:
+            discover(command_split)
     elif command_split[0] == 'ping':
-        ping(command_split)
+        if len(command_split) != 2:
+            print("Note : ping only accept 1 argument")
+        else:
+            ping(command_split)
     elif command_split[0] == 'exit':
         return
+    elif command_split[0] == 'help':
+        help()
 
 def handle_process(client_socket):
     thread1 = Thread(target=new_client_connect, args=(client_socket,))
@@ -122,7 +141,6 @@ def main():
     try:
         while True:
             client, addr = server_socket.accept()
-            print(f'Connected from : {addr}')
             thread = Thread(target=handle_process, args=(client,))
             thread.start()
     finally:
